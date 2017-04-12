@@ -24,9 +24,9 @@ from urllib import urlencode
 import os.path
 import subprocess
 import time
-import lib.simplejson as simplejson
+import simplejson
 import json
-import lib.requests as requests
+import requests
 
 # This was obviously all taken from headphones with great appreciation :)
 
@@ -91,8 +91,11 @@ class NMA:
         self._session = requests.Session()
 
     def _send(self, data, module):
-
-        r = self._session.post(self.NMA_URL, data=data, verify=True)
+        try:
+            r = self._session.post(self.NMA_URL, data=data, verify=True)
+        except requests.exceptions.RequestException as e:                
+            logger.error(module + '[' + str(e) + '] Unable to send via NMA. Aborting notification for this item.')
+            return False
 
         logger.fdebug('[NMA] Status code returned: ' + str(r.status_code))
         if r.status_code == 200:
@@ -154,12 +157,17 @@ class PUSHOVER:
         self._session = requests.Session()
         self._session.headers = {'Content-type': "application/x-www-form-urlencoded"}
 
-    def notify(self, message, event, module=None):
+    def notify(self, event, message=None, snatched_nzb=None, prov=None, sent_to=None, module=None):
         if not mylar.PUSHOVER_ENABLED:
             return
         if module is None:
             module = ''
         module += '[NOTIFIER]'
+
+        if snatched_nzb:
+            if snatched_nzb[-1] == '\.': 
+                snatched_nzb = snatched_nzb[:-1]
+            message = "Mylar has snatched: " + snatched_nzb + " from " + prov + " and has sent it to " + sent_to
 
         data = {'token': mylar.PUSHOVER_APIKEY,
                 'user': mylar.PUSHOVER_USERKEY,
@@ -326,3 +334,33 @@ class PUSHBULLET:
     def test_notify(self):
         return self.notify(prline='Test Message', prline2='Release the Ninjas!')
 
+class TELEGRAM:
+    def __init__(self):
+        self.token = mylar.TELEGRAM_TOKEN
+        self.userid = mylar.TELEGRAM_USERID
+        self.TELEGRAM_API = "https://api.telegram.org/bot%s/%s"
+
+    def notify(self, message, status):
+        if not mylar.TELEGRAM_ENABLED:
+            return
+
+        # Construct message
+        payload = {'chat_id': self.userid, 'text': status + ': ' + message}
+
+        # Send message to user using Telegram's Bot API
+        try:
+            response = requests.post(self.TELEGRAM_API % (self.token, "sendMessage"), data=payload)
+        except Exception, e:
+            logger.info(u'Telegram notify failed: ' + str(e))
+
+        # Error logging
+        sent_successfuly = True
+        if not response.status_code == 200:
+            logger.info(u'Could not send notification to TelegramBot (token=%s). Response: [%s]', (self.token, response.text))
+            sent_successfuly = False
+
+        logger.info(u"Telegram notifications sent.")
+        return sent_successfuly
+
+    def test_notify(self):
+        return self.notify('Test Message', 'Release the Ninjas!')

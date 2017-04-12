@@ -62,7 +62,7 @@
                                 </div>
 				<form action="comicScan" method="GET" id="comicScan">
 					<legend>Scan Comic Library</legend>
-					<p><strong>Where do you keep your comics?</strong></p>
+					<p><strong>Where are the comics you want scanned in located?</strong></p>
 					<p>You can put in any directory, and it will scan for comics</br>
                                         in that folder (including all subdirectories). <br/>
                                         <small>For example: '/Users/name/Comics'</small></p>	
@@ -96,8 +96,8 @@
                                                <small>Rename files to configuration settings</small>
                                         </div>
                                         <br/>
-                                      <input type="button" value="Save Changes and Scan" onclick="addScanAction();doAjaxCall('comicScan',$(this),'tabs',true);return true;" data-success="Import Scan now submitted.">
-                                      <input type="button" value="Save Changes without Scanning Library" onclick="doAjaxCall('comicScan',$(this),'tabs',true);return false;" data-success="Changes Saved Successfully">
+                                      <input type="button" value="Save Changes and Scan" onclick="addScanAction();doAjaxCall('comicScan',$(this),'tabs',true);return true;" data-success="Import Scan now submitted." data-error="Unable to start the scan. Check the logs.">
+                                      <input type="button" value="Save Changes without Scanning Library" onclick="doAjaxCall('comicScan',$(this),'tabs',true);return false;" data-success="Changes Saved Successfully" data-error="Unable to save settings. Check the logs.">
                                       %if mylar.IMPORTBUTTON:
                                           <input type="button" value="Import Results Management" style="float: right;" onclick="location.href='importResults';" />
                                       %endif
@@ -138,7 +138,7 @@
                 </div>
 
         <div id="tabs-3">
-           <table class="configtable" summary="Advanced Options">
+           <table summary="Advanced Options" class="configtable">
 
                <tr>
                  <td>
@@ -155,9 +155,12 @@
                     <fieldset>
                         <legend>Export</legend>
                         <div class="links">
-                          <a href="#" onclick="doAjaxCall('wanted_Export',$(this))" data-sucess="Exported to Wanted list." data-error="Failed to export. Check logs"><span class="ui-icon ui-icon-refresh"></span>Export Wanted to CSV</a>
+                          <a href="#" onclick="doAjaxCall('wanted_Export?mode=Wanted',$(this))" data-sucess="Exported to Wanted list." data-error="Failed to export. Check logs"><span class="ui-icon ui-icon-refresh"></span>Export Wanted to CSV</a>
+                          <a href="#" onclick="doAjaxCall('wanted_Export?mode=Downloaded',$(this))" data-sucess="Exported to Downloaded list." data-error="Failed to export. Check logs"><span class="ui-icon ui-icon-refresh"></span>Export Downloaded to CSV</a>
                         </div>
-                        <br/><br/>
+                    </fieldset>
+                    </br>
+                    <fieldset>
                         <legend>Additional Options</legend>
                         <div classs="links">
                           <a href="readlist">Reading List Management</a><br/>

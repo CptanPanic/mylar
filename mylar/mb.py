@@ -21,11 +21,11 @@ import threading
 import platform
 import urllib, urllib2
 from xml.dom.minidom import parseString, Element
-import lib.requests as requests
+import requests
 
 import mylar
 from mylar import logger, db, cv
-from mylar.helpers import multikeysort, replace_all, cleanName, listLibrary
+from mylar.helpers import multikeysort, replace_all, cleanName, listLibrary, listStoryArcs
 import httplib
 
 mb_lock = threading.Lock()
@@ -49,7 +49,7 @@ def pullsearch(comicapi, comicquery, offset, explicit, type):
     u_comicquery = u_comicquery.replace(" ", "%20")
 
     if explicit == 'all' or explicit == 'loose':
-        PULLURL = mylar.CVURL + 'search?api_key=' + str(comicapi) + '&resources=' + str(type) + '&query=' + u_comicquery + '&field_list=id,name,start_year,first_issue,site_detail_url,count_of_issues,image,publisher,deck,description,last_issue&format=xml&page=' + str(offset)
+        PULLURL = mylar.CVURL + 'search?api_key=' + str(comicapi) + '&resources=' + str(type) + '&query=' + u_comicquery + '&field_list=id,name,start_year,first_issue,site_detail_url,count_of_issues,image,publisher,deck,description,last_issue&format=xml&limit=100&page=' + str(offset)
 
     else:
         # 02/22/2014 use the volume filter label to get the right results.
@@ -68,10 +68,9 @@ def pullsearch(comicapi, comicquery, offset, explicit, type):
 
     #download the file:
     payload = None
-    verify = False
 
     try:
-        r = requests.get(PULLURL, params=payload, verify=verify, headers=mylar.CV_HEADERS)
+        r = requests.get(PULLURL, params=payload, verify=mylar.CV_VERIFY, headers=mylar.CV_HEADERS)
     except Exception, e:
         logger.warn('Error fetching data from ComicVine: %s' % (e))
         return
@@ -211,6 +210,7 @@ def findComic(name, mode, issue, limityear=None, explicit=None, type=None):
 
                     if xmlid is not None:
                         arcinfolist = storyarcinfo(xmlid)
+                        logger.info('[IMAGE] : ' + arcinfolist['comicimage'])
                         comiclist.append({
                                 'name':                 xmlTag,
                                 'comicyear':            arcinfolist['comicyear'],
@@ -300,11 +300,11 @@ def findComic(name, mode, issue, limityear=None, explicit=None, type=None):
                                 if not any(int(x) == int(i) for x in yearRange):
                                     yearRange.append(str(i))
 
-                        logger.fdebug('[RESULT] ComicName:' + xmlTag + ' -- ' + str(xmlYr) + ' [Series years: ' + str(yearRange) + ']')
+                        logger.fdebug('[RESULT][' + str(limityear) + '] ComicName:' + xmlTag + ' -- ' + str(xmlYr) + ' [Series years: ' + str(yearRange) + ']')
                         if tmpYr != xmlYr:
                             xmlYr = tmpYr
                        
-                        if any([limityear in yearRange, limityear == 'None']):
+                        if any(map(lambda v: v in limityear, yearRange)) or limityear == 'None':
                             xmlurl = result.getElementsByTagName('site_detail_url')[0].firstChild.wholeText
                             idl = len (result.getElementsByTagName('id'))
                             idt = 0
@@ -346,6 +346,20 @@ def findComic(name, mode, issue, limityear=None, explicit=None, type=None):
                             except:
                                 xmldeck = "None"
 
+                            xmltype = None
+                            if xmldeck != 'None':
+                                if any(['print' in xmldeck.lower(), 'digital' in xmldeck.lower()]):
+                                    if 'print' in xmldeck.lower():
+                                        xmltype = 'Print'
+                                    elif 'digital' in xmldeck.lower():
+                                        xmltype = 'Digital'
+                            if xmldesc != 'None' and xmltype is None:
+                                if 'print' in xmldesc[:60].lower() and 'print edition can be found' not in xmldesc.lower():
+                                    xmltype = 'Print'
+                                elif 'digital' in xmldesc[:60].lower() and 'digital edition can be found' not in xmldesc.lower():
+                                    xmltype = 'Digital'
+                                else:
+                                    xmltype = 'Print'
 
                             if xmlid in comicLibrary:
                                 haveit = comicLibrary[xmlid]
@@ -361,6 +375,7 @@ def findComic(name, mode, issue, limityear=None, explicit=None, type=None):
                                     'publisher':            xmlpub,
                                     'description':          xmldesc,
                                     'deck':                 xmldeck,
+                                    'type':                 xmltype,
                                     'haveit':               haveit,
                                     'lastissueid':          xml_lastissueid,
                                     'seriesrange':          yearRange  # returning additional information about series run polled from CV
@@ -377,7 +392,7 @@ def findComic(name, mode, issue, limityear=None, explicit=None, type=None):
 
 def storyarcinfo(xmlid):
 
-    comicLibrary = listLibrary()
+    comicLibrary = listStoryArcs()
 
     arcinfo = {}
 
@@ -388,8 +403,8 @@ def storyarcinfo(xmlid):
         comicapi = mylar.COMICVINE_API
 
     #respawn to the exact id for the story arc and count the # of issues present.
-    ARCPULL_URL = mylar.CVURL + 'story_arc/4045-' + str(xmlid) + '/?api_key=' + str(comicapi) + '&field_list=issues,name,first_appeared_in_issue,deck,image&format=xml&offset=0'
-    logger.fdebug('arcpull_url:' + str(ARCPULL_URL))
+    ARCPULL_URL = mylar.CVURL + 'story_arc/4045-' + str(xmlid) + '/?api_key=' + str(comicapi) + '&field_list=issues,publisher,name,first_appeared_in_issue,deck,image&format=xml&offset=0'
+    #logger.fdebug('arcpull_url:' + str(ARCPULL_URL))
 
     #new CV API restriction - one api request / second.
     if mylar.CVAPI_RATE is None or mylar.CVAPI_RATE < 2:
@@ -399,10 +414,9 @@ def storyarcinfo(xmlid):
 
     #download the file:
     payload = None
-    verify = False
 
     try:
-        r = requests.get(ARCPULL_URL, params=payload, verify=verify, headers=mylar.CV_HEADERS)
+        r = requests.get(ARCPULL_URL, params=payload, verify=mylar.CV_VERIFY, headers=mylar.CV_HEADERS)
     except Exception, e:
         logger.warn('Error fetching data from ComicVine: %s' % (e))
         return
@@ -472,6 +486,11 @@ def storyarcinfo(xmlid):
         xmldesc = "None"
 
     try:
+        xmlpub = arcdom.getElementsByTagName('publisher')[0].firstChild.wholeText
+    except:
+        xmlpub = "None"
+
+    try:
         xmldeck = arcdom.getElementsByTagName('deck')[0].firstChild.wholeText
     except:
         xmldeck = "None"
@@ -492,7 +511,8 @@ def storyarcinfo(xmlid):
             'description':          xmldesc,
             'deck':                 xmldeck,
             'arclist':              arclist,
-            'haveit':               haveit
+            'haveit':               haveit,
+            'publisher':            xmlpub
             }
 
     return arcinfo

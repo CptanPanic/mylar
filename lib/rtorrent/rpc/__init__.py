@@ -19,12 +19,12 @@
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import inspect
-import lib.rtorrent
+import rtorrent
 import re
-from lib.rtorrent.common import bool_to_int, convert_version_tuple_to_str,\
+from rtorrent.common import bool_to_int, convert_version_tuple_to_str,\
     safe_repr
-from lib.rtorrent.err import MethodError
-from lib.rtorrent.compat import xmlrpclib
+from rtorrent.err import MethodError
+from rtorrent.compat import xmlrpclib
 
 
 def get_varname(rpc_call):
@@ -45,7 +45,7 @@ def get_varname(rpc_call):
 
 def _handle_unavailable_rpc_method(method, rt_obj):
     msg = "Method isn't available."
-    if rt_obj._get_client_version_tuple() < method.min_version:
+    if rt_obj.connection._get_client_version_tuple() < method.min_version:
         msg = "This method is only available in " \
             "RTorrent version v{0} or later".format(
             convert_version_tuple_to_str(method.min_version))
@@ -108,8 +108,8 @@ class Method:
             return(False)
 
     def is_available(self, rt_obj):
-        if rt_obj._get_client_version_tuple() < self.min_version or \
-                self.rpc_call not in rt_obj._get_rpc_methods():
+        if rt_obj.connection._get_client_version_tuple() < self.min_version or \
+                self.rpc_call not in rt_obj.connection._get_rpc_methods():
             return(False)
         else:
             return(True)
@@ -225,11 +225,11 @@ def call_method(class_obj, method, *args):
 def find_method(rpc_call):
     """Return L{Method} instance associated with given RPC call"""
     method_lists = [
-        lib.rtorrent.methods,
-        lib.rtorrent.file.methods,
-        lib.rtorrent.tracker.methods,
-        lib.rtorrent.peer.methods,
-        lib.rtorrent.torrent.methods,
+        rtorrent.methods,
+        rtorrent.file.methods,
+        rtorrent.tracker.methods,
+        rtorrent.peer.methods,
+        rtorrent.torrent.methods,
     ]
 
     for l in method_lists:

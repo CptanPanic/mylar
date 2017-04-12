@@ -91,7 +91,7 @@ class FileChecker(object):
 
 
         self.failed_files = []
-        self.dynamic_handlers = ['/','-',':','\'',',','&','?','!','+']
+        self.dynamic_handlers = ['/','-',':','\'',',','&','?','!','+','(',')']
         self.dynamic_replacements = ['and','the']
         self.rippers = ['-empire','-empire-hd','minutemen-','-dcp']
 
@@ -142,15 +142,17 @@ class FileChecker(object):
                     if any([run_status == 'success', run_status == 'match']):
                         if self.justparse:
                             comiclist.append({
-                                    'sub':            runresults['sub'],
-                                    'comicfilename':  runresults['comicfilename'],
-                                    'comiclocation':  runresults['comiclocation'],
-                                    'series_name':    runresults['series_name'],
-                                    'dynamic_name':   runresults['dynamic_name'],
-                                    'series_volume':  runresults['series_volume'],
-                                    'issue_year':     runresults['issue_year'],
-                                    'issue_number':   runresults['issue_number'],
-                                    'scangroup':      runresults['scangroup']
+                                    'sub':                 runresults['sub'],
+                                    'comicfilename':       runresults['comicfilename'],
+                                    'comiclocation':       runresults['comiclocation'],
+                                    'series_name':         runresults['series_name'],
+                                    'series_name_decoded': runresults['series_name_decoded'],
+                                    'dynamic_name':        runresults['dynamic_name'],
+                                    'series_volume':       runresults['series_volume'],
+                                    'issue_year':          runresults['issue_year'],
+                                    'issue_number':        runresults['issue_number'],
+                                    'scangroup':           runresults['scangroup'],
+                                    'reading_order':       runresults['reading_order']
                                     })
                         else:
                             comiclist.append({
@@ -229,6 +231,7 @@ class FileChecker(object):
             #split the file and then get all the relevant numbers that could possibly be an issue number.
             #remove the extension.
             modfilename = re.sub(filetype, '', filename).strip()
+            reading_order = None
 
             #if it's a story-arc, make sure to remove any leading reading order #'s
             if self.sarc and mylar.READ2FILENAME:
@@ -236,6 +239,8 @@ class FileChecker(object):
                 if mylar.FOLDER_SCAN_LOG_VERBOSE:
                    logger.fdebug('[SARC] Checking filename for Reading Order sequence - Reading Sequence Order found #: ' + str(modfilename[:removest]))
                 if modfilename[:removest].isdigit() and removest <= 3:
+                    reading_order = {'reading_sequence': str(modfilename[:removest]),
+                                     'filename':         filename[removest+1:]}
                     modfilename = modfilename[removest+1:]
                     if mylar.FOLDER_SCAN_LOG_VERBOSE:
                         logger.fdebug('[SARC] Removed Reading Order sequence from subname. Now set to : ' + modfilename)
@@ -256,14 +261,29 @@ class FileChecker(object):
                             elif rp.lower() in m[cnt].lower():
                                 scangroup = re.sub('[\(\)]', '', m[cnt]).strip()
                                 logger.fdebug('Scanner group tag discovered: ' + scangroup)
-                                modfilename = re.sub(m[cnt],'', modfilename).strip()
+                                modfilename = modfilename.replace(m[cnt],'').strip()
                                 break
                             cnt +=1
+
+                    modfilename = modfilename.replace('()','').strip()
 
             #here we take a snapshot of the current modfilename, the intent is that we will remove characters that match
             #as we discover them - namely volume, issue #, years, etc
             #the remaining strings should be the series title and/or issue title if present (has to be detected properly)
             modseries = modfilename
+
+            #try and remove /remember unicode character strings here (multiline ones get seperated/removed in below regex)
+            pat = re.compile(u'[\x00-\x7f]{3,}', re.UNICODE)
+            replack = pat.sub('XCV', modfilename)
+            wrds = replack.split('XCV')
+            tmpfilename = modfilename
+            if len(wrds) > 1:
+                for i in list(wrds):
+                    if i != '':
+                        tmpfilename = re.sub(i, 'XCV', tmpfilename)
+
+            tmpfilename = ''.join(tmpfilename)
+            modfilename = tmpfilename
 
             sf3 = re.compile(ur"[^,\s_]+", re.UNICODE)
             split_file3 = sf3.findall(modfilename)
@@ -273,11 +293,10 @@ class FileChecker(object):
                 split_file3 = sf3.findall(modfilename)
                 logger.fdebug('NEW split_file3: ' + str(split_file3))
 
-            #print split_file3
             ret_sf2 = ' '.join(split_file3)
 
             sf = re.findall('''\( [^\)]* \) |\[ [^\]]* \] |\S+''', ret_sf2, re.VERBOSE)
-            #print sf
+
             ret_sf1 = ' '.join(sf)
 
             #here we should account for some characters that get stripped out due to the regex's
@@ -289,13 +308,13 @@ class FileChecker(object):
             ret_sf1 = re.sub('\&', 'f11', ret_sf1).strip()
             ret_sf1 = re.sub('\'', 'g11', ret_sf1).strip()
 
-            #split_file = re.findall('\([\w\s-]+\)|[\w-]+', ret_sf1, re.UNICODE)
-            split_file = re.findall('\([\w\s-]+\)|[-+]?\d*\.\d+|\d+|[\w-]+|#?\d\.\d+|\)', ret_sf1, re.UNICODE)
+            #split_file = re.findall('\([\w\s-]+\)|[-+]?\d*\.\d+|\d+|[\w-]+|#?\d\.\d+|#(?<![\w\d])XCV(?![\w\d])+|\)', ret_sf1, re.UNICODE)
+            split_file = re.findall('(?imu)\([\w\s-]+\)|[-+]?\d*\.\d+|\d+|[\w-]+|#?\d\.\d+|#(?<![\w\d])XCV(?![\w\d])+|\)', ret_sf1, re.UNICODE)
 
             if len(split_file) == 1:
                 logger.fdebug('Improperly formatted filename - there is no seperation using appropriate characters between wording.')
                 ret_sf1 = re.sub('\-',' ', ret_sf1).strip()
-                split_file = re.findall('\([\w\s-]+\)|[-+]?\d*\.\d+|\d+|[\w-]+|#?\d\.\d+|\)', ret_sf1, re.UNICODE)
+                split_file = re.findall('(?imu)\([\w\s-]+\)|[-+]?\d*\.\d+|\d+|[\w-]+|#?\d\.\d+|#(?<![\w\d])XCV(?![\w\d])+|\)', ret_sf1, re.UNICODE)
 
 
             possible_issuenumbers = []
@@ -308,7 +327,7 @@ class FileChecker(object):
             lastmod_position = 0
 
             #exceptions that are considered alpha-numeric issue numbers
-            exceptions = ('NOW', 'AI', 'AU', 'X', 'A', 'B', 'C', 'INH')
+            exceptions = ('NOW', 'AI', 'AU', 'X', 'A', 'B', 'C', 'INH', 'MU')
 
             #unicode characters, followed by int value 
     #        num_exceptions = [{iss:u'\xbd',val:.5},{iss:u'\xbc',val:.25}, {iss:u'\xe',val:.75}, {iss:u'\221e',val:'infinity'}]
@@ -363,29 +382,16 @@ class FileChecker(object):
                                                           'mod_position': self.char_file_position(modfilename, sf, lastmod_position),
                                                           'validcountchk': validcountchk})
  
-                try:
-                    sf.decode('ascii')
-                except:
-                    logger.fdebug('Unicode character detected: ' + sf)
-                    if '\xbd' in sf: #.encode('utf-8'):
-                        logger.fdebug('[SPECIAL-CHARACTER ISSUE] Possible issue # : ' + sf)
-                        possible_issuenumbers.append({'number':       sf,
-                                                      'position':     split_file.index(sf),
-                                                      'mod_position': self.char_file_position(modfilename, sf, lastmod_position),
-                                                      'validcountchk': validcountchk})
-
-                    if '\xe2' in sf:  #(maybe \u221e)
-                        logger.fdebug('[SPECIAL-CHARACTER ISSUE] Possible issue # : ' + sf)
-                        possible_issuenumbers.append({'number':       sf,
-                                                      'position':     split_file.index(sf),
-                                                      'mod_position': self.char_file_position(modfilename, sf, lastmod_position),
-                                                      'validcountchk': validcountchk})
-
-                    #if '\xbc' in sf:
-                    #   '0.25'
-                    #if '\xbe' in sf::
-                    #   '0.75'
-
+                if sf == 'XCV':
+#  new 2016-09-19 \ attempt to check for XCV which replaces any unicode above
+                    for x in list(wrds):
+                        if x != '':
+                            tmpissue_number = re.sub('XCV', x, split_file[split_file.index(sf)])
+                    logger.info('[SPECIAL-CHARACTER ISSUE] Possible issue # : ' + tmpissue_number)
+                    possible_issuenumbers.append({'number':       sf,
+                                                  'position':     split_file.index(sf),
+                                                  'mod_position': self.char_file_position(modfilename, sf, lastmod_position),
+                                                  'validcountchk': validcountchk})
 
                 count = None
                 found = False
@@ -411,16 +417,12 @@ class FileChecker(object):
                     logger.fdebug('Issue Number SHOULD BE: ' + str(lastissue_label))
                     validcountchk = True
 
-                if lastissue_position == (split_file.index(sf) -1) and lastissue_label is not None and '#' not in sf:
+                if all([lastissue_position == (split_file.index(sf) -1), lastissue_label is not None and '#' not in sf]):
                     #find it in the original file to see if there's a decimal between.
-                    #logger.fdebug('lastissue_label: ' + str(lastissue_label))
-                    #logger.fdebug('current sf: ' + str(sf))
-                    #logger.fdebug('file_length: ' + str(file_length))
-                    #logger.fdebug('search_file_length: ' + str(lastissue_mod_position))
-                    #logger.fdebug('trunced_search_length: ' + modfilename[lastissue_mod_position+1:]
                     findst = lastissue_mod_position+1
-                    #findst = modfilename.find(lastissue_label, lastissue_mod_position+1) #lastissue_mod_position) #file_length - len(lastissue_label))
-                    #logger.fdebug('findst: ' + str(findst))
+                    if findst > len(modfilename):
+                        findst = len(modfilename) -1
+
                     if modfilename[findst] != '.' or modfilename[findst] != '#': #findst != '.' and findst != '#':
                         if sf.isdigit():
                             logger.fdebug('2 seperate numbers detected. Assuming 2nd number is the actual issue')
@@ -448,8 +450,8 @@ class FileChecker(object):
                             logger.fdebug('[DECiMAL-DETECTION] Issue being stored for validation as : ' + modfilename[findst:cf+len(sf)])
                             for x in possible_issuenumbers:
                                 possible_issuenumbers = []
-                                logger.fdebug('compare: ' + str(x['position']) + ' .. ' + str(lastissue_position))
-                                logger.fdebug('compare: ' + str(x['position']) + ' .. ' + str(split_file.index(sf, lastissue_position)))
+                                #logger.fdebug('compare: ' + str(x['position']) + ' .. ' + str(lastissue_position))
+                                #logger.fdebug('compare: ' + str(x['position']) + ' .. ' + str(split_file.index(sf, lastissue_position)))
                                 if int(x['position']) != int(lastissue_position) and int(x['position']) != split_file.index(sf, lastissue_position):
                                     possible_issuenumbers.append({'number':        x['number'],
                                                                   'position':      x['position'],
@@ -492,15 +494,21 @@ class FileChecker(object):
                                                   'validcountchk': validcountchk})
 
                 #now we try to find the series title &/or volume lablel.
-                if any( [sf.lower().startswith('v'), sf.lower().startswith('vol'), volumeprior == True, 'volume' in sf.lower(), 'vol' in sf.lower()] ):
-                    if sf[1:].isdigit() or sf[3:].isdigit() or volumeprior == True:
+                if any( [sf.lower().startswith('v'), sf.lower().startswith('vol'), volumeprior == True, 'volume' in sf.lower(), 'vol' in sf.lower()] ) and sf.lower() not in {'one','two','three','four','five','six'}:
+                    if any([ split_file[split_file.index(sf)].isdigit(), split_file[split_file.index(sf)][3:].isdigit(), split_file[split_file.index(sf)][1:].isdigit() ]):
                         volume = re.sub("[^0-9]", "", sf)
-                        volume_found['volume'] = volume
                         if volumeprior:
-                            volume_found['position'] = split_file.index(volumeprior_label)
+                            try:
+                                volume_found['position'] = split_file.index(volumeprior_label, current_pos -1) #if this passes, then we're ok, otherwise will try exception
+                                logger.fdebug('volume_found: ' + str(volume_found['position']))
+                            except:
+                                sep_volume = False
+                                continue
                         else:
-                            volume_found['position'] = split_file.index(sf)
-                        #logger.fdebug('volume label detected as : Volume ' + str(volume) + ' @ position: ' + str(split_file.index(sf)))
+                            volume_found['position'] = split_file.index(sf, current_pos)
+
+                        volume_found['volume'] = volume
+                        logger.fdebug('volume label detected as : Volume ' + str(volume) + ' @ position: ' + str(split_file.index(sf)))
                         volumeprior = False
                         volumeprior_label = None
                     elif 'vol' in sf.lower() and len(sf) == 3:
@@ -508,7 +516,7 @@ class FileChecker(object):
                         volumeprior = True
                         volumeprior_label = sf
                         sep_volume = True
-                        #logger.fdebug('volume label detected, but vol. number is not adjacent, adjusting scope to include number.')
+                        logger.fdebug('volume label detected, but vol. number is not adjacent, adjusting scope to include number.')
                     elif 'volume' in sf.lower():
                         volume = re.sub("[^0-9]", "", sf)
                         if volume.isdigit():
@@ -519,7 +527,15 @@ class FileChecker(object):
                             volumeprior_label = sf
                             sep_volume = True
 
+                    elif any([sf == 'I', sf == 'II', sf == 'III', sf == 'IV']) and volumeprior:
+                        volumeprior = False
+                        volumeprior_label = None
+                        sep_volume = False
+                        continue
                 else:
+                    #reset the sep_volume indicator here in case a false Volume detected above
+                    sep_volume = False
+
                     #check here for numeric or negative number
                     if sf.isdigit() and split_file.index(sf, current_pos) == 0:
                         continue
@@ -575,6 +591,7 @@ class FileChecker(object):
             highest_series_pos = len(split_file)
             issue_year = None
             possible_years = []
+            yearmodposition = None
             logger.fdebug('datecheck: ' + str(datecheck))
             if len(datecheck) > 0:
                 for dc in sorted(datecheck, key=operator.itemgetter('position'), reverse=True):
@@ -582,7 +599,8 @@ class FileChecker(object):
                     ab = str(a)
                     sctd = self.checkthedate(str(dt.datetime.now().year))
                     logger.fdebug('sctd: ' + str(sctd))
-                    if int(ab) > int(sctd):
+                    # + 1 sctd so that we can allow for issue dates that cross over into the following year when it's nearer to the end of said year.
+                    if int(ab) > int(sctd) + 1:
                         logger.fdebug('year is in the future, ignoring and assuming part of series title.')
                         yearposition = None
                         yearmodposition = None
@@ -602,6 +620,7 @@ class FileChecker(object):
                     else:
                         issue_year = ab
                         logger.fdebug('date verified as: ' + str(issue_year))
+
                     if highest_series_pos > dc['position']: highest_series_pos = dc['position']
                     yearposition = dc['position']
                     yearmodposition = dc['mod_position']
@@ -615,9 +634,9 @@ class FileChecker(object):
 
             issue_number = None
             issue_number_position = 0
+            dash_numbers = []
             if len(possible_issuenumbers) > 0:
                 logger.fdebug('possible_issuenumbers: ' + str(possible_issuenumbers))
-                dash_numbers = []
                 if len(possible_issuenumbers) > 1:
                     p = 1
                     if '-' not in split_file[0]:
@@ -667,27 +686,39 @@ class FileChecker(object):
                 else:
                     issue_number = possible_issuenumbers[0]['number']
                     issue_number_position = possible_issuenumbers[0]['position']
-                    logger.fdebug('issue verified as : ' + issue_number)
                     if highest_series_pos > possible_issuenumbers[0]['position']: highest_series_pos = possible_issuenumbers[0]['position']
 
-                if issue_number:
-                    issue_number = re.sub('#', '', issue_number).strip()
-                else:
-                    if len(dash_numbers) > 0 and finddash !=-1 :
-                        #there are numbers after a dash, which was incorrectly accounted for.
-                        fin_num_position = finddash
-                        fin_num = None
-                        for dn in dash_numbers:
-                            if dn['mod_position'] > finddash and dn['mod_position'] > fin_num_position:
-                                fin_num_position = dn['mod_position']
-                                fin_num = dn['number']
-                                fin_pos = dn['position']
+            if issue_number:
+                issue_number = re.sub('#', '', issue_number).strip()
+            else:
+                if len(dash_numbers) > 0 and finddash !=-1 :
+                    #there are numbers after a dash, which was incorrectly accounted for.
+                    fin_num_position = finddash
+                    fin_num = None
+                    for dn in dash_numbers:
+                        if dn['mod_position'] > finddash and dn['mod_position'] > fin_num_position:
+                            fin_num_position = dn['mod_position']
+                            fin_num = dn['number']
+                            fin_pos = dn['position']
 
-                        if fin_num:
-                            logger.fdebug('Issue number re-corrected to : ' + fin_num)
-                            issue_number = fin_num
-                            if highest_series_pos > fin_pos: highest_series_pos = fin_pos
+                    if fin_num:
+                        logger.fdebug('Issue number re-corrected to : ' + fin_num)
+                        issue_number = fin_num
+                        if highest_series_pos > fin_pos: highest_series_pos = fin_pos
 
+   #--- this is new - 2016-09-18 /account for unicode in issue number when issue number is not deteted above
+            logger.fdebug('issue_position: ' + str(issue_number_position))
+            if all([issue_number_position == highest_series_pos, 'XCV' in split_file, issue_number is None]):
+                for x in list(wrds):
+                    if x != '':
+                        issue_number = re.sub('XCV', x, split_file[issue_number_position-1])
+                        highest_series_pos -=1
+                        issue_number_position -=1
+
+            if issue_number is None:
+                logger.fdebug('No issue number present in filename.')
+            else:
+                logger.fdebug('issue verified as : ' + issue_number)
             issue_volume = None
             if len(volume_found) > 0:
                 issue_volume = 'v' + str(volume_found['volume'])
@@ -696,6 +727,7 @@ class FileChecker(object):
                     split_file.insert(int(issue_number_position), split_file.pop(volume_found['position'])) #highest_series_pos-1, split_file.pop(volume_found['position']))
                     logger.fdebug('new split: ' + str(split_file))
                     highest_series_pos = volume_found['position'] -1
+                    issue_number_position -=1
                 else:
                     if highest_series_pos > volume_found['position']:
                         if sep_volume:
@@ -724,6 +756,13 @@ class FileChecker(object):
                         logger.fdebug('year ' + str(x['year']) + ' is outside of series title range. Accepting of year.')
                         issue_year = x['year']
 
+            else:
+                try:
+                    if possible_years[0]['yearposition'] <= highest_series_pos:
+                       highest_series_pos = possible_years[0]['yearposition']
+                except:
+                    pass
+
             match_type = None  #folder/file based on how it was matched.
 
             #logger.fdebug('highest_series_pos is : ' + str(highest_series_pos)
@@ -731,6 +770,14 @@ class FileChecker(object):
             #namely, unique characters - known so far: +
             #c1 = '+'
             series_name = ' '.join(split_file[:highest_series_pos])
+
+            for x in list(wrds):
+                if x != '':
+                    if 'XCV' in series_name:
+                        series_name = re.sub('XCV', x, series_name,1)
+                    elif 'XCV' in issue_number:
+                        issue_number = re.sub('XCV', x, issue_number,1)
+
             series_name = re.sub('c11', '+', series_name)
             series_name = re.sub('f11', '&', series_name)
             series_name = re.sub('g11', '\'', series_name)
@@ -741,60 +788,57 @@ class FileChecker(object):
 
             logger.fdebug('series title possibly: ' + series_name)
 
+            #if the filename is unicoded, it won't match due to the unicode translation. Keep the unicode as well as the decoded.
+            series_name_decoded= unicodedata.normalize('NFKD', helpers.conversion(series_name)).encode('ASCII', 'ignore')
+
             #check for annual in title(s) here.
             if mylar.ANNUALS_ON:
                 if 'annual' in series_name.lower():
                     issue_number = 'Annual ' + str(issue_number)
                     series_name = re.sub('annual', '', series_name, flags=re.I).strip()
-            #if path_list is not None:
-            #    clocation = os.path.join(path, path_list, filename)
-            #else:
-            #    clocation = self.dir
-
-            #if issue_number is None:
-            #    sntmp = series_name.split()
-            #    for sn in sorted(sntmp):
-            #        if sn.isdigit():
-            #            issue_number = sn
-            #            series_name = re.sub(sn, '' , series_name).strip()
-            #            break
+                    series_name_decoded = re.sub('annual', '', series_name_decoded, flags=re.I).strip()
+                   
 
             if issue_number is None or series_name is None:
                 logger.fdebug('Cannot parse the filename properly. I\'m going to make note of this filename so that my evil ruler can make it work.')
-                return {'parse_status':   'failure',
-                        'sub':            path_list,
-                        'comicfilename':  filename,
-                        'comiclocation':  self.dir,
-                        'series_name':    series_name,
-                        'issue_number':   issue_number,
-                        'justthedigits':   issue_number, #redundant but it's needed atm
-                        'series_volume':  issue_volume,
-                        'issue_year':     issue_year,
-                        'annual_comicid': None,
-                        'scangroup':      scangroup}
+                return {'parse_status':        'failure',
+                        'sub':                 path_list,
+                        'comicfilename':       filename,
+                        'comiclocation':       self.dir,
+                        'series_name':         series_name,
+                        'series_name_decoded': series_name_decoded,
+                        'issue_number':        issue_number,
+                        'justthedigits':       issue_number, #redundant but it's needed atm
+                        'series_volume':       issue_volume,
+                        'issue_year':          issue_year,
+                        'annual_comicid':      None,
+                        'scangroup':           scangroup}
 
             if self.justparse:
-                return {'parse_status':   'success',
-                        'type':           re.sub('\.','', filetype).strip(),
-                        'sub':            path_list,
-                        'comicfilename':  filename,
-                        'comiclocation':  self.dir,
-                        'series_name':    series_name,
-                        'dynamic_name':   self.dynamic_replace(series_name)['mod_seriesname'],
-                        'series_volume':  issue_volume,
-                        'issue_year':     issue_year,
-                        'issue_number':   issue_number,
-                        'scangroup':      scangroup}
+                return {'parse_status':           'success',
+                        'type':                   re.sub('\.','', filetype).strip(),
+                        'sub':                    path_list,
+                        'comicfilename':          filename,
+                        'comiclocation':          self.dir,
+                        'series_name':            series_name,
+                        'series_name_decoded':    series_name_decoded,
+                        'dynamic_name':           self.dynamic_replace(series_name)['mod_seriesname'],
+                        'series_volume':          issue_volume,
+                        'issue_year':             issue_year,
+                        'issue_number':           issue_number,
+                        'scangroup':              scangroup,
+                        'reading_order':          reading_order}
 
             series_info = {}
-            series_info = {'sub':            path_list,
-                          'comicfilename':   filename,
-                          'comiclocation':   self.dir,
-                          'series_name':     series_name,
-                          'series_volume':   issue_volume,
-                          'issue_year':      issue_year,
-                          'issue_number':    issue_number,
-                          'scangroup':       scangroup}
+            series_info = {'sub':                   path_list,
+                          'comicfilename':          filename,
+                          'comiclocation':          self.dir,
+                          'series_name':            series_name,
+                          'series_name_decoded':    series_name_decoded,
+                          'series_volume':          issue_volume,
+                          'issue_year':             issue_year,
+                          'issue_number':           issue_number,
+                          'scangroup':              scangroup}
 
             return self.matchIT(series_info)
 
@@ -802,15 +846,22 @@ class FileChecker(object):
             series_name = series_info['series_name']
             filename = series_info['comicfilename']
             #compare here - match comparison against u_watchcomic.
-            logger.info('Series_Name: ' + series_name.lower() + ' --- WatchComic: ' + self.watchcomic.lower())
+            logger.info('Series_Name: ' + series_name + ' --- WatchComic: ' + self.watchcomic)
             #check for dynamic handles here.
             mod_dynamicinfo = self.dynamic_replace(series_name)
             mod_seriesname = mod_dynamicinfo['mod_seriesname'] 
             mod_watchcomic = mod_dynamicinfo['mod_watchcomic'] 
 
+            mod_series_decoded = self.dynamic_replace(series_info['series_name_decoded'])
+            mod_seriesname_decoded = mod_dynamicinfo['mod_seriesname']
+            mod_watch_decoded = self.dynamic_replace(self.og_watchcomic)
+            mod_watchname_decoded = mod_dynamicinfo['mod_seriesname']
+
             #remove the spaces...
             nspace_seriesname = re.sub(' ', '', mod_seriesname)
             nspace_watchcomic = re.sub(' ', '', mod_watchcomic)
+            nspace_seriesname_decoded = re.sub(' ', '', mod_seriesname_decoded)
+            nspace_watchname_decoded = re.sub(' ', '', mod_watchname_decoded)
 
             if '127372873872871091383' not in self.AS_Alt:
                 logger.fdebug('Possible Alternate Names to match against (if necessary): ' + str(self.AS_Alt))
@@ -821,8 +872,10 @@ class FileChecker(object):
                 if 'annual' in series_name.lower():
                     justthedigits = 'Annual ' + series_info['issue_number']
                 nspace_seriesname = re.sub('annual', '', nspace_seriesname.lower()).strip()
+                nspace_seriesname_decoded = re.sub('annual', '', nspace_seriesname_decoded.lower()).strip()
 
-            if re.sub('\|','', nspace_seriesname.lower()).strip() == re.sub('\|', '', nspace_watchcomic.lower()).strip() or any(re.sub('[\|\s]','', x.lower()).strip() == re.sub('[\|\s]','', nspace_seriesname.lower()).strip() for x in self.AS_Alt):
+
+            if any([re.sub('\|','', nspace_seriesname.lower()).strip() == re.sub('\|', '', nspace_watchcomic.lower()).strip(), re.sub('\|','', nspace_seriesname_decoded.lower()).strip() == re.sub('\|', '', nspace_watchname_decoded.lower()).strip()]) or any(re.sub('[\|\s]','', x.lower()).strip() == re.sub('[\|\s]','', nspace_seriesname.lower()).strip() for x in self.AS_Alt):
                 logger.fdebug('[MATCH: ' + series_info['series_name'] + '] ' + filename)
                 enable_annual = False
                 annual_comicid = None
@@ -938,7 +991,7 @@ class FileChecker(object):
                         #Ignoring MAC OS Finder directory of cached files (/.AppleDouble/<name of file(s)>)
                         continue
 
-                if fname.endswith(comic_ext):
+                if os.path.splitext(fname)[1].lower().endswith(comic_ext):
                     if direc is None:
                         comicsize = os.path.getsize(os.path.join(dir, fname))
                     else:
@@ -1013,7 +1066,12 @@ class FileChecker(object):
 
         if mod_watchcomic:
             mod_watchcomic = re.sub('\|+', '|', mod_watchcomic)
+            if mod_watchcomic.endswith('|'):
+                mod_watchcomic = mod_watchcomic[:-1]
+
         mod_seriesname = re.sub('\|+', '|', mod_seriesname)
+        if mod_seriesname.endswith('|'):
+            mod_seriesname = mod_seriesname[:-1]
 
         return {'mod_watchcomic': mod_watchcomic,
                 'mod_seriesname': mod_seriesname}
@@ -1118,10 +1176,13 @@ def validateAndCreateDirectory(dir, create=False, module=None):
                 if dir.strip():
                     logger.info(module + ' Creating comic directory (' + str(mylar.CHMOD_DIR) + ') : ' + dir)
                     try:
-                        permission = int(mylar.CHMOD_DIR, 8)
                         os.umask(0) # this is probably redudant, but it doesn't hurt to clear the umask here.
-                        os.makedirs(dir.rstrip(), permission)
-                        setperms(dir.rstrip(), True)
+                        if mylar.ENFORCE_PERMS:
+                            permission = int(mylar.CHMOD_DIR, 8)
+                            os.makedirs(dir.rstrip(), permission)
+                            setperms(dir.rstrip(), True)
+                        else:
+                            os.makedirs(dir.rstrip())
                     except OSError as e:
                         logger.warn(module + ' Could not create directory: ' + dir + '[' + str(e) + ']. Aborting.')
                         return False

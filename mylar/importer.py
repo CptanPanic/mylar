@@ -28,7 +28,7 @@ import shutil
 import imghdr
 import sqlite3
 import cherrypy
-import lib.requests as requests
+import requests
 import gzip
 from StringIO import StringIO
 
@@ -50,7 +50,7 @@ def is_exists(comicid):
         return False
 
 
-def addComictoDB(comicid, mismatch=None, pullupd=None, imported=None, ogcname=None, calledfrom=None, annload=None, chkwant=None, issuechk=None, issuetype=None, latestissueinfo=None):
+def addComictoDB(comicid, mismatch=None, pullupd=None, imported=None, ogcname=None, calledfrom=None, annload=None, chkwant=None, issuechk=None, issuetype=None, latestissueinfo=None, csyear=None):
     # Putting this here to get around the circular import. Will try to use this to update images at later date.
 #    from mylar import cache
 
@@ -166,6 +166,11 @@ def addComictoDB(comicid, mismatch=None, pullupd=None, imported=None, ogcname=No
             SeriesYear = gcdinfo['SeriesYear']
     else:
         SeriesYear = comic['ComicYear']
+
+    logger.info(SeriesYear)
+    if any([int(SeriesYear) > int(datetime.datetime.now().year) + 1, int(SeriesYear) == 2099]) and csyear is not None:
+        logger.info('Corrected year of ' + str(SeriesYear) + ' to corrected year for series that was manually entered previously of ' + str(csyear))
+        SeriesYear = csyear
 
     logger.info('Sucessfully retrieved details for ' + comic['ComicName'])
 
@@ -340,7 +345,11 @@ def addComictoDB(comicid, mismatch=None, pullupd=None, imported=None, ogcname=No
         if comversion == 'None':
             chunk_f_f = re.sub('\$VolumeN', '', mylar.FOLDER_FORMAT)
             chunk_f = re.compile(r'\s+')
-            mylar.FOLDER_FORMAT = chunk_f.sub(' ', chunk_f_f)
+            chunk_folder_format = chunk_f.sub(' ', chunk_f_f)
+            logger.fdebug('No version # found for series, removing from folder format')
+            logger.fdebug("new folder format: " + str(chunk_folder_format))
+        else:
+            chunk_folder_format = mylar.FOLDER_FORMAT
 
         #do work to generate folder path
 
@@ -357,7 +366,7 @@ def addComictoDB(comicid, mismatch=None, pullupd=None, imported=None, ogcname=No
         if mylar.FOLDER_FORMAT == '':
             comlocation = os.path.join(mylar.DESTINATION_DIR, comicdir, " (" + SeriesYear + ")")
         else:
-            comlocation = os.path.join(mylar.DESTINATION_DIR, helpers.replace_all(mylar.FOLDER_FORMAT, values))
+            comlocation = os.path.join(mylar.DESTINATION_DIR, helpers.replace_all(chunk_folder_format, values))
 
 
         #comlocation = mylar.DESTINATION_DIR + "/" + comicdir + " (" + comic['ComicYear'] + ")"
@@ -416,7 +425,7 @@ def addComictoDB(comicid, mismatch=None, pullupd=None, imported=None, ogcname=No
 
     logger.info('Attempting to retrieve the comic image for series')
     try:
-        r = requests.get(comic['ComicImage'], params=None, stream=True, headers=mylar.CV_HEADERS)
+        r = requests.get(comic['ComicImage'], params=None, stream=True, verify=mylar.CV_VERIFY, headers=mylar.CV_HEADERS)
 
     except Exception, e:
         logger.warn('Unable to download image from CV URL link: ' + comic['ComicImage'] + ' [Status Code returned: ' + str(r.status_code) + ']')
@@ -453,7 +462,7 @@ def addComictoDB(comicid, mismatch=None, pullupd=None, imported=None, ogcname=No
                        
         logger.info('Attempting to retrieve alternate comic image for the series.')
         try:
-            r = requests.get(comic['ComicImageALT'], params=None, stream=True, headers=mylar.CV_HEADERS)
+            r = requests.get(comic['ComicImageALT'], params=None, stream=True, verify=mylar.CV_VERIFY, headers=mylar.CV_HEADERS)
 
         except Exception, e:
             logger.warn('Unable to download image from CV URL link: ' + comic['ComicImageALT'] + ' [Status Code returned: ' + str(r.status_code) + ']')
@@ -485,8 +494,9 @@ def addComictoDB(comicid, mismatch=None, pullupd=None, imported=None, ogcname=No
     if mylar.COMIC_COVER_LOCAL:
         try:
             comiclocal = os.path.join(comlocation, 'cover.jpg')
-            shutil.copy(coverfile, comiclocal)
-            filechecker.setperms(comiclocal)
+            shutil.copyfile(coverfile, comiclocal)
+            if mylar.ENFORCE_PERMS:
+                filechecker.setperms(comiclocal)
         except IOError as e:
             logger.error('Unable to save cover (' + str(coverfile) + ') into series directory (' + str(comiclocal) + ') at this time.')
 
@@ -529,6 +539,7 @@ def addComictoDB(comicid, mismatch=None, pullupd=None, imported=None, ogcname=No
                     "DetailURL":          comic['ComicURL'],
 #                    "ComicPublished":    gcdinfo['resultPublished'],
                     "ComicPublished":     "Unknown",
+                    "Type":               comic['Type'],
                     "DateAdded":          helpers.today(),
                     "Status":             "Loading"}
 
@@ -581,7 +592,7 @@ def addComictoDB(comicid, mismatch=None, pullupd=None, imported=None, ogcname=No
     lastpubdate = issuedata['LastPubDate']
     series_status = issuedata['SeriesStatus']
     #move the files...if imported is not empty & not futurecheck (meaning it's not from the mass importer.)
-    logger.info('imported is : ' + str(imported))
+    #logger.info('imported is : ' + str(imported))
     if imported is None or imported == 'None' or imported == 'futurecheck':
         pass
     else:
@@ -1007,7 +1018,7 @@ def GCDimport(gcomicid, pullupd=None, imported=None, ogcname=None):
     if mylar.CVINFO:
         if not os.path.exists(comlocation + "/cvinfo"):
             with open(comlocation + "/cvinfo", "w") as text_file:
-                text_file.write("http://www.comicvine.com/volume/49-" + str(comicid))
+                text_file.write("http://comicvine.gamespot.com/volume/49-" + str(comicid))
 
     logger.info(u"Updating complete for: " + ComicName)
 
@@ -1066,7 +1077,9 @@ def issue_collection(issuedata, nostatus):
                             "Issue_Number":       issue['Issue_Number'],
                             "IssueDate":          issue['IssueDate'],
                             "ReleaseDate":        issue['ReleaseDate'],
-                            "Int_IssueNumber":    issue['Int_IssueNumber']
+                            "Int_IssueNumber":    issue['Int_IssueNumber'],
+                            "ImageURL":           issue['ImageURL'],
+                            "ImageURL_ALT":       issue['ImageURL_ALT']
                             #"Status":             "Skipped"  #set this to Skipped by default to avoid NULL entries.
                             }
 
@@ -1251,6 +1264,8 @@ def updateissuedata(comicid, comicname=None, issued=None, comicIssues=None, call
                     int_issnum = (int(issnum[:-4]) * 1000) + ord('i') + ord('n') + ord('h')
                 elif 'now' in issnum.lower():
                     int_issnum = (int(issnum[:-4]) * 1000) + ord('n') + ord('o') + ord('w')
+                elif 'mu' in issnum.lower():
+                    int_issnum = (int(issnum[:-3]) * 1000) + ord('m') + ord('u')
                 elif u'\xbd' in issnum:
                     int_issnum = .5 * 1000
                     logger.info('1/2 issue detected :' + issnum + ' === ' + str(int_issnum))
@@ -1345,6 +1360,8 @@ def updateissuedata(comicid, comicname=None, issued=None, comicIssues=None, call
                                 issnum = u'9\xbd'
                                 logger.fdebug('issue: 9-5 is an invalid entry. Correcting to : ' + issnum)
                                 int_issnum = (9 * 1000) + (.5 * 1000)
+                            elif issnum == '112/113':
+                                int_issnum = (112 * 1000) + (.5 * 1000)
                             else:
                                 logger.error(issnum + ' this has an alpha-numeric in the issue # which I cannot account for.')
                                 return
@@ -1380,7 +1397,9 @@ def updateissuedata(comicid, comicname=None, issued=None, comicIssues=None, call
                               "Issue_Number":       issnum,
                               "IssueDate":          issdate,
                               "ReleaseDate":        storedate,
-                              "Int_IssueNumber":    int_issnum})
+                              "Int_IssueNumber":    int_issnum,
+                              "ImageURL":           firstval['Image'],
+                              "ImageURL_ALT":       firstval['ImageALT']})
 
             n+=1
 
@@ -1552,7 +1571,10 @@ def annual_check(ComicName, SeriesYear, comicid, issuetype, issuechk, weeklyissu
                         if int(sr['issues']) == 0 and len(issued['issuechoice']) == 1:
                             sr_issues = 1
                         else:
-                            sr_issues = sr['issues']
+                            if int(sr['issues']) != len(issued['issuechoice']):
+                                sr_issues = len(issued['issuechoice'])
+                            else:
+                                sr_issues = sr['issues']
                         logger.fdebug('[IMPORTER-ANNUAL] - There are ' + str(sr_issues) + ' annuals in this series.')
                         while (n < int(sr_issues)):
                             try:
